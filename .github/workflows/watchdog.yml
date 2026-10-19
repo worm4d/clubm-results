@@ -1,0 +1,55 @@
+# 机器人看门狗：每 30 分钟检查两个机器人有没有按时回报，太久没回报就发 Telegram。
+# 放在 repo 的 .github/workflows/watchdog.yml（main 分支）。
+# 要先在 repo 的 Settings → Secrets and variables → Actions 加两个 secret：
+#   TG_TOKEN   = Telegram 机器人 token（跟 bot_config.json 里的一样）
+#   TG_CHAT    = 你的 chat_id
+name: watchdog
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}          # 也可以在 Actions 页面按「Run workflow」手动测试
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 检查机器人
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+          REPO: ${{ github.repository }}
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request, urllib.parse
+          repo = os.environ["REPO"]; now = time.time() * 1000
+          def get(f):
+              url = f"https://raw.githubusercontent.com/{repo}/data/data/{f}?t={int(now)}"
+              with urllib.request.urlopen(url, timeout=20) as r: return json.load(r)
+          # (名字, 文件, 超过几分钟算停, 正常多久回报一次)
+          bots = [("A 组 · 5 分钟（Club M）", "status.json", 50, "30 分钟"),
+                  ("B 组 · 4 小时（突破）", "d20.json", 50, "15 分钟")]
+          bad, ok = [], []
+          for name, f, lim, every in bots:
+              try:
+                  j = get(f); t = j.get("last_cycle") or j.get("updated"); age = (now - t) / 60000
+              except Exception as e:
+                  bad.append(f"{name}：读不到回报（{e}）"); continue
+              if age > lim:
+                  # 第一次发现 + 之后每 6 小时提醒一次，不会每 30 分钟一直吵
+                  over = age - lim
+                  if over < 35 or (over % 360) < 35 or os.environ.get("MANUAL") == "true":
+                      bad.append(f"{name}：已经 {age/60:.1f} 小时没回报（正常每 {every} 一次）")
+              else:
+                  ok.append(f"{name}：正常（{age:.0f} 分钟前回报）")
+          if os.environ.get("MANUAL") == "true" and not bad:
+              msg = "【看门狗测试】两个机器人都正常\n" + "\n".join(ok)
+          elif bad:
+              msg = "【看门狗】机器人可能停了，去看一下 iMac！\n" + "\n".join(bad) + ("\n" + "\n".join(ok) if ok else "") + \
+                    "\n常见原因：iMac 睡着 / 断电 / 断网 / 登出。"
+          else:
+              print("都正常：", ok); raise SystemExit(0)
+          body = json.dumps({"chat_id": os.environ["TG_CHAT"], "text": msg}).encode()
+          req = urllib.request.Request(f"https://api.telegram.org/bot{os.environ['TG_TOKEN']}/sendMessage", body, {"Content-Type": "application/json"})
+          print(urllib.request.urlopen(req, timeout=20).read()[:200])
+          PY
