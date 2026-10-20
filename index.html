@@ -82,7 +82,12 @@ th:first-child,td:first-child{text-align:left}
 .btn.ghost{background:transparent;border:1px solid var(--rule);color:var(--ink);font-size:12.5px;padding:4px 10px}
 .note{color:var(--muted);font-size:12.5px;margin:6px 0 0}
 .empty{color:var(--muted);padding:18px 0;text-align:center}
-@media (max-width:860px){.work,.grid2{grid-template-columns:1fr}.hero{grid-template-columns:1fr}.hero .big{font-size:30px}.chartbox{height:340px}}
+.wallet .hero{grid-template-columns:minmax(240px,auto) 1fr}
+.wallet .row2{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin-top:10px;font-size:12.5px;color:var(--muted)}
+.wallet input{font:inherit;font-family:var(--f-num);width:90px;padding:3px 7px;border:1px solid var(--rule);border-radius:6px;background:var(--panel);color:var(--ink)}
+.bar{height:8px;border-radius:999px;background:var(--soft);overflow:hidden;margin-top:6px;display:flex}
+.bar i{display:block;height:100%} .bar .a{background:var(--accent)} .bar .b{background:var(--gold)}
+@media (max-width:860px){.work,.grid2{grid-template-columns:1fr}.hero,.wallet .hero{grid-template-columns:1fr}.hero .big{font-size:30px}.chartbox{height:340px}}
 </style>
 </head>
 <body>
@@ -97,6 +102,21 @@ th:first-child,td:first-child{text-align:left}
       <button class="btn ghost" type="button" id="refresh">重新整理</button>
     </div>
   </header>
+  <section class="card wallet" aria-labelledby="wTitle">
+    <div class="hero">
+      <div>
+        <span class="lab" id="wTitle">钱包（A 组 + B 组共用一个）</span>
+        <div class="big" id="wBal">—</div>
+        <div class="note" id="wSub"></div>
+        <div class="bar" id="wBar" title="蓝 = A 组占用，橘 = B 组占用"></div>
+      </div>
+      <div class="tiles" id="wTiles"></div>
+    </div>
+    <div class="row2">
+      <label>钱包起始 <input type="number" id="wStart" min="0" step="100"> U</label>
+      <span id="wNote"></span>
+    </div>
+  </section>
 
   <nav class="tabs" role="tablist" aria-label="切换">
     <button type="button" role="tab" id="tabM" aria-selected="true">A 组 · 5 分钟</button>
@@ -186,7 +206,7 @@ async function load() {
   try {
     const [res, sta] = await Promise.all([getJ("results.json"), getJ("status.json")]);
     D = {...res, ...sta, trades: res.trades, signals: res.signals};
-    render();
+    render(); renderW();
   } catch (e) { $("statusTxt").textContent = REPO ? "还读不到成绩：" + e.message + "（机器人还没上传过？）" : "网址不对：要用 用户名.github.io/repo名/"; $("status").classList.add("bad"); }
 }
 $("refresh").onclick = () => { load(); loadT(); };
@@ -195,7 +215,7 @@ function tab(v) { TAB = v; $("tabM").setAttribute("aria-selected", String(v === 
   $("paneM").hidden = v !== "M"; $("paneT").hidden = v !== "T"; try { localStorage.setItem("tab", v); } catch (e) {}
   if (v === "T") { if (TD) renderT(); else loadT(); } else if (D) render(); statusLine(); }
 $("tabM").onclick = () => tab("M"); $("tabT").onclick = () => tab("T");
-async function loadT() { try { TD = await getJ("d20.json"); if (TAB === "T") renderT(); } catch (e) { TD = null; if (TAB === "T") { $("tTiles").innerHTML = `<div class="empty">还读不到 B 组成绩（${esc(e.message)}）</div>`; } } statusLine(); }
+async function loadT() { try { TD = await getJ("d20.json"); if (TAB === "T") renderT(); renderW(); } catch (e) { TD = null; if (TAB === "T") { $("tTiles").innerHTML = `<div class="empty">还读不到 B 组成绩（${esc(e.message)}）</div>`; } } statusLine(); }
 function statusLine() { if (TAB !== "T") return; if (!TD) { $("statusTxt").textContent = "B 组载入中…"; return; }
   const age = (Date.now() - TD.updated) / 60000; $("status").classList.toggle("bad", age > 60);
   $("statusTxt").textContent = age > 60 ? `B 组机器人 ${Math.round(age)} 分钟没更新，可能停了` : `B 组机器人正常 · ${Math.round(age)} 分钟前回报（每 15 分钟一次；4 小时 K 收线才开平仓）`; $("sub").textContent = `${TD.started || "—"} 开始`; }
@@ -342,6 +362,44 @@ function candle(c, d, tip) {
   if (tip) { c.onmousemove = ev => { const r = c.getBoundingClientRect(), i = Math.floor((ev.clientX - r.left - padL) / bw); if (i < 0 || i >= n) { tip.hidden = true; return; } const b = B[i];
       tip.hidden = false; tip.textContent = `${fT(b[0])}  开 ${fP(b[1])} 高 ${fP(b[2])} 低 ${fP(b[3])} 收 ${fP(b[4])}`; tip.style.left = Math.min(Math.max(4, ev.clientX - r.left + 12), r.width - tip.offsetWidth - 4) + "px"; tip.style.top = "4px"; };
     c.onmouseleave = () => tip.hidden = true; }
+}
+
+// ── 钱包：A + B 共用一个 ──
+const AM = 50;   // A 组每单保证金（50 U × 100 倍）
+const pT = s => { const m = /^(\d\d)-(\d\d) (\d\d):(\d\d)/.exec(s || ""); if (!m) return null; const y = new Date().getUTCFullYear();
+  let t = Date.UTC(y, +m[1] - 1, +m[2], +m[3], +m[4]) - MY; if (t > Date.now() + 864e5) t = Date.UTC(y - 1, +m[1] - 1, +m[2], +m[3], +m[4]) - MY; return t; };
+function wStart() { try { const v = +localStorage.getItem("wStart"); if (v > 0) return v; } catch (e) {} return 1000; }
+$("wStart").value = wStart();
+$("wStart").onchange = () => { const v = +$("wStart").value; if (v > 0) { try { localStorage.setItem("wStart", String(v)); } catch (e) {} } renderW(); };
+function renderW() {
+  const S = wStart();
+  const aOk = D && !D.empty, bOk = !!TD;
+  const aR = aOk ? (+D.balance || 0) - (+D.start || 0) : 0, bR = bOk ? (+TD.bal || 0) - (+TD.start || 0) : 0;
+  const aO = aOk ? (D.open || []) : [], bO = bOk ? (TD.open || []) : [];
+  const aU = aO.reduce((s, p) => s + (+p.unreal_U || 0), 0), bU = bO.reduce((s, p) => s + (+p.U || 0), 0);
+  const bMiss = bO.some(p => p.margin == null);
+  const aM = aO.length * AM, bM = bO.reduce((s, p) => s + (+p.margin || 0), 0);
+  const bal = S + aR + bR, eq = bal + aU + bU, used = aM + bM, free = eq - used;
+  $("wBal").textContent = bal.toFixed(1) + " U"; $("wBal").className = "big num " + c0(aR + bR);
+  $("wSub").innerHTML = `起始 ${S} U · 已实现 <span class="${c0(aR + bR)}">${fU(aR + bR)}</span>` + (aU || bU ? ` · 算上持仓浮动 = <b class="num">${eq.toFixed(1)} U</b>` : "");
+  const pa = eq > 0 ? Math.min(100, aM / eq * 100) : 0, pb = eq > 0 ? Math.min(100 - pa, bM / eq * 100) : 0;
+  $("wBar").innerHTML = `<i class="a" style="width:${pa}%"></i><i class="b" style="width:${pb}%"></i>`;
+  // 开始以来最多同时占用（平仓的单 + 现在的持仓）
+  const ev = [];
+  if (aOk) { (D.trades || []).forEach(t => { const a = pT(t.t_in), b = pT(t.t_out); if (a != null && b != null) { ev.push([a, AM]); ev.push([b, -AM]); } });
+    aO.forEach(p => ev.push([+p.t_in || Date.now(), AM])); }
+  if (bOk) { const lev = +TD.lev || 2; (TD.trades || []).forEach(t => { const a = pT(t.t_in), b = pT(t.t_out), m = (+t.notional || 0) / lev; if (a != null && b != null) { ev.push([a, m]); ev.push([b, -m]); } });
+    bO.forEach(p => ev.push([+p.t_in || Date.now(), +p.margin || 0])); }
+  ev.sort((x, y) => x[0] - y[0] || x[1] - y[1]); let cur = 0, peak = 0, peakT = null; ev.forEach(([t, m]) => { cur += m; if (cur > peak + 1e-9) { peak = cur; peakT = t; } });
+  const tile = (lab, val, cls, small) => `<div class="tile"><span class="lab">${lab}</span><b class="${cls || ""}">${val}</b>${small ? `<small>${small}</small>` : ""}</div>`;
+  $("wTiles").innerHTML =
+      tile("已实现盈亏", fU(aR + bR), c0(aR + bR), `A ${fU(aR)} · B ${fU(bR)}`)
+    + tile("持仓浮动", fU(aU + bU), c0(aU + bU), `A ${aO.length} 单 ${fU(aU)} · B ${bO.length} 单 ${fU(bU)}`)
+    + tile("占用保证金", used.toFixed(1) + " U" + (bMiss ? "*" : ""), "", `A ${aM.toFixed(0)}（${aO.length} × ${AM}）· B ${bM.toFixed(1)}`)
+    + tile("还可以用", free.toFixed(1) + " U", free < 0 ? "neg" : "", eq > 0 ? `占用 ${(used / eq * 100).toFixed(0)}%` : "")
+    + tile("开始以来最多同时占用", peak.toFixed(1) + " U", "", peakT ? fT(peakT) : "还没开过单");
+  $("wNote").innerHTML = (bMiss ? "* B 组机器人要更新到 2026-10-20a 版才会回报保证金，现在 B 组没算进去。 " : "")
+    + "回测参考（2021–2026）：B 组 10 个币最多同时占用约 <b>712 U</b>（平常约 210 U），A 组最多 4 × 50 = <b>200 U</b>。两个加起来最多约 910 U，钱包要比这个多，再留回撤的空间。";
 }
 window.addEventListener("resize", () => { if (D) render(); });
 load(); loadT(); timer = setInterval(() => { if (!document.hidden) { load(); loadT(); } }, 120000);
