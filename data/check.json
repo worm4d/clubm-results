@@ -1,1 +1,1 @@
-{"updated": 1792545124355, "ok": true, "version": "2026-10-20a", "a": {"window": "10-20 18:20 → 10-21 09:02", "expected": 21, "matched": 21, "trades": 2}, "b": {"window": "2026-10-20 17:43 开始到现在", "expected": 0, "matched": 0}, "issues": [], "vcheck": []}
+{"updated": 1792631525358, "ok": true, "version": "2026-10-20a", "a": {"window": "10-20 18:20 → 10-22 09:02", "expected": 44, "matched": 44, "trades": 5}, "b": {"window": "2026-10-20 17:43 开始到现在", "expected": 7, "matched": 7}, "issues": [], "vcheck": []}
