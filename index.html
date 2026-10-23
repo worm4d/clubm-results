@@ -87,6 +87,11 @@ th:first-child,td:first-child{text-align:left}
 .wallet input{font:inherit;font-family:var(--f-num);width:90px;padding:3px 7px;border:1px solid var(--rule);border-radius:6px;background:var(--panel);color:var(--ink)}
 .bar{height:8px;border-radius:999px;background:var(--soft);overflow:hidden;margin-top:6px;display:flex}
 .bar i{display:block;height:100%} .bar .a{background:var(--accent)} .bar .b{background:var(--gold)}
+.guard{display:flex;flex-direction:column;gap:6px;font-size:13px}
+.guard .row{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
+.guard .ok{color:var(--up);font-weight:600} .guard .bad{color:var(--down);font-weight:600}
+.guard.alert{border-color:var(--down);box-shadow:inset 4px 0 0 var(--down)}
+.guard ul{margin:2px 0 0;padding-left:18px;color:var(--ink)} .guard li{margin:1px 0}
 @media (max-width:860px){.work,.grid2{grid-template-columns:1fr}.hero,.wallet .hero{grid-template-columns:1fr}.hero .big{font-size:30px}.chartbox{height:340px}}
 </style>
 </head>
@@ -102,6 +107,11 @@ th:first-child,td:first-child{text-align:left}
       <button class="btn ghost" type="button" id="refresh">重新整理</button>
     </div>
   </header>
+  <section class="card guard" id="guard" aria-label="机器人核对">
+    <div class="row"><b>机器人核对</b><span id="gA">A 组 …</span><span id="gB">B 组 …</span></div>
+    <div class="row" id="gC">每日对账：载入中…</div>
+    <ul id="gList" hidden></ul>
+  </section>
   <section class="card wallet" aria-labelledby="wTitle">
     <div class="hero">
       <div>
@@ -206,16 +216,16 @@ async function load() {
   try {
     const [res, sta] = await Promise.all([getJ("results.json"), getJ("status.json")]);
     D = {...res, ...sta, trades: res.trades, signals: res.signals};
-    render(); renderW();
+    render(); renderW(); renderG();
   } catch (e) { $("statusTxt").textContent = REPO ? "还读不到成绩：" + e.message + "（机器人还没上传过？）" : "网址不对：要用 用户名.github.io/repo名/"; $("status").classList.add("bad"); }
 }
-$("refresh").onclick = () => { load(); loadT(); };
+$("refresh").onclick = () => { load(); loadT(); loadC(); };
 let TD = null, TAB = "M";
 function tab(v) { TAB = v; $("tabM").setAttribute("aria-selected", String(v === "M")); $("tabT").setAttribute("aria-selected", String(v === "T"));
   $("paneM").hidden = v !== "M"; $("paneT").hidden = v !== "T"; try { localStorage.setItem("tab", v); } catch (e) {}
   if (v === "T") { if (TD) renderT(); else loadT(); } else if (D) render(); statusLine(); }
 $("tabM").onclick = () => tab("M"); $("tabT").onclick = () => tab("T");
-async function loadT() { try { TD = await getJ("d20.json"); if (TAB === "T") renderT(); renderW(); } catch (e) { TD = null; if (TAB === "T") { $("tTiles").innerHTML = `<div class="empty">还读不到 B 组成绩（${esc(e.message)}）</div>`; } } statusLine(); }
+async function loadT() { try { TD = await getJ("d20.json"); if (TAB === "T") renderT(); renderW(); renderG(); } catch (e) { TD = null; if (TAB === "T") { $("tTiles").innerHTML = `<div class="empty">还读不到 B 组成绩（${esc(e.message)}）</div>`; } } statusLine(); }
 function statusLine() { if (TAB !== "T") return; if (!TD) { $("statusTxt").textContent = "B 组载入中…"; return; }
   const age = (Date.now() - TD.updated) / 60000; $("status").classList.toggle("bad", age > 60);
   $("statusTxt").textContent = age > 60 ? `B 组机器人 ${Math.round(age)} 分钟没更新，可能停了` : `B 组机器人正常 · ${Math.round(age)} 分钟前回报（每 15 分钟一次；4 小时 K 收线才开平仓）`; $("sub").textContent = `${TD.started || "—"} 开始`; }
@@ -401,8 +411,33 @@ function renderW() {
   $("wNote").innerHTML = (bMiss ? "* B 组机器人要更新到 2026-10-20a 版才会回报保证金，现在 B 组没算进去。 " : "")
     + "回测参考（2021–2026）：B 组 10 个币最多同时占用约 <b>712 U</b>（平常约 210 U），A 组最多 4 × 50 = <b>200 U</b>。两个加起来最多约 910 U，钱包要比这个多，再留回撤的空间。";
 }
+
+// ── 机器人核对：跑的版本 / 设定码 是不是预期的；每日对账结果 ──
+const EXPECT = {A: {version: "2026-10-20a", fp: "d42202ee"}, B: {version: "2026-10-20c", fp: "4fd769d8"}};
+let CK = null, CKerr = null;
+async function loadC() { try { CK = await getJ("check.json"); CKerr = null; } catch (e) { CK = null; CKerr = e.message; } renderG(); }
+function renderG() {
+  const one = (g, x) => {
+    if (!x) return [`${g} 组 载入中…`, false];
+    if (!x.version) return [`${g} 组 <span class="bad">✗ 旧版机器人（没有回报版本）</span>`, true];
+    const ok = x.version === EXPECT[g].version && x.fp === EXPECT[g].fp;
+    return [`${g} 组 版本 <span class="num">${esc(x.version)}</span> · 设定码 <span class="num">${esc(x.fp)}</span> ` + (ok ? `<span class="ok">✓ 跟预期一样</span>` : `<span class="bad">✗ 预期 ${EXPECT[g].version} · ${EXPECT[g].fp}</span>`), !ok];
+  };
+  const [ha, ba] = one("A", D && !D.empty ? D : null), [hb, bb] = one("B", TD);
+  $("gA").innerHTML = ha; $("gB").innerHTML = hb;
+  let bad = ba || bb, items = [];
+  if (CK) {
+    const age = (Date.now() - CK.updated) / 3600e3, stale = age > 26;
+    $("gC").innerHTML = `每日对账（${fT(CK.updated)}）：` + (CK.ok ? `<span class="ok">✓ 全部一样</span>` : `<span class="bad">✗ ${CK.issues.length} 个地方不一样</span>`)
+      + ["a", "b"].map(k => CK[k] && CK[k].expected != null ? ` · ${k.toUpperCase()} 组 应有 ${CK[k].expected}、对上 ${CK[k].matched}` : "").join("")
+      + (stale ? ` <span class="bad">（超过一天没对账，检查 iMac）</span>` : "");
+    if (!CK.ok || stale) bad = true; items = CK.ok ? [] : CK.issues;
+  } else $("gC").textContent = "每日对账：还没跑过" + (CKerr && !/404/.test(CKerr) ? `（${CKerr}）` : "");
+  $("gList").hidden = !items.length; $("gList").innerHTML = items.slice(0, 20).map(x => `<li>${esc(x)}</li>`).join("");
+  $("guard").classList.toggle("alert", bad);
+}
 window.addEventListener("resize", () => { if (D) render(); });
-load(); loadT(); timer = setInterval(() => { if (!document.hidden) { load(); loadT(); } }, 120000);
+load(); loadT(); loadC(); timer = setInterval(() => { if (!document.hidden) { load(); loadT(); loadC(); } }, 120000);
 try { if (localStorage.getItem("tab") === "T") tab("T"); } catch (e) {}
 })();
 </script>
