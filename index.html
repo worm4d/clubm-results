@@ -86,7 +86,7 @@ th:first-child,td:first-child{text-align:left}
 .wallet .row2{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin-top:10px;font-size:12.5px;color:var(--muted)}
 .wallet input{font:inherit;font-family:var(--f-num);width:90px;padding:3px 7px;border:1px solid var(--rule);border-radius:6px;background:var(--panel);color:var(--ink)}
 .bar{height:8px;border-radius:999px;background:var(--soft);overflow:hidden;margin-top:6px;display:flex}
-.bar i{display:block;height:100%} .bar .a{background:var(--accent)} .bar .b{background:var(--gold)}
+.bar i{display:block;height:100%} .bar .a{background:var(--accent)} .bar .b{background:var(--gold)} .bar .c{background:var(--up)}
 .guard{display:flex;flex-direction:column;gap:6px;font-size:13px}
 .guard .row{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
 .guard .ok{color:var(--up);font-weight:600} .guard .bad{color:var(--down);font-weight:600}
@@ -108,17 +108,17 @@ th:first-child,td:first-child{text-align:left}
     </div>
   </header>
   <section class="card guard" id="guard" aria-label="机器人核对">
-    <div class="row"><b>机器人核对</b><span id="gA">A 组 …</span><span id="gB">B 组 …</span></div>
+    <div class="row"><b>机器人核对</b><span id="gA">A 组 …</span><span id="gB">B 组 …</span><span id="gCv">C 组 …</span></div>
     <div class="row" id="gC">每日对账：载入中…</div>
     <ul id="gList" hidden></ul>
   </section>
   <section class="card wallet" aria-labelledby="wTitle">
     <div class="hero">
       <div>
-        <span class="lab" id="wTitle">钱包（A 组 + B 组共用一个）</span>
+        <span class="lab" id="wTitle">钱包（A、B、C 三组共用一个）</span>
         <div class="big" id="wBal">—</div>
         <div class="note" id="wSub"></div>
-        <div class="bar" id="wBar" title="蓝 = A 组占用，橘 = B 组占用"></div>
+        <div class="bar" id="wBar" title="蓝 = A 组占用，橘 = B 组占用，绿 = C 组占用"></div>
       </div>
       <div class="tiles" id="wTiles"></div>
     </div>
@@ -131,6 +131,7 @@ th:first-child,td:first-child{text-align:left}
   <nav class="tabs" role="tablist" aria-label="切换">
     <button type="button" role="tab" id="tabM" aria-selected="true">A 组 · 5 分钟</button>
     <button type="button" role="tab" id="tabT" aria-selected="false">B 组 · 4 小时</button>
+    <button type="button" role="tab" id="tabC" aria-selected="false">C 组 · FVG</button>
   </nav>
   <div id="paneM">
   <section class="card hero" aria-label="总结">
@@ -192,6 +193,22 @@ th:first-child,td:first-child{text-align:left}
   <section class="card"><h2 id="tCnt">平仓的单</h2><div class="tw" style="max-height:520px;overflow:auto"><table id="tTr"></table></div></section>
   </div>
 
+  <div id="paneC" hidden>
+  <section class="card hero" aria-label="C 组总结">
+    <div><div class="lab">模拟资金</div><div class="big" id="cBal">—</div><div class="num" id="cPnl"></div></div>
+    <div class="tiles" id="cTiles"></div>
+  </section>
+  <section class="card" aria-label="C 组资金曲线">
+    <h2>资金曲线（按平仓顺序）</h2>
+    <div class="eqbox"><canvas id="cEq" aria-label="资金曲线"></canvas><div class="tip" id="cEqTip" hidden></div></div>
+  </section>
+  <section class="card"><h2 id="cOpenTitle">持仓中</h2><div class="tw"><table id="cOpen"></table></div></section>
+  <section class="card"><h2 id="cPendTitle">挂单中（还没成交）</h2><div class="tw"><table id="cPend"></table></div>
+    <p class="note">C 组：1h FVG + 折价/溢价 + 15m MSS + 1h EMA200 同向；挂单在最新 15m FVG 边缘，16 根 15m 内没成交就取消；止损回踩极端、止盈 1h 订单块（盈亏比 ≥ 2）。每单 100 U × 100 倍。</p></section>
+  <section class="card"><h2>每个币</h2><div class="tw"><table id="cSym"></table></div></section>
+  <section class="card"><h2 id="cCnt">平仓的单</h2><div class="tw" style="max-height:520px;overflow:auto"><table id="cTr"></table></div></section>
+  </div>
+
 </div>
 
 <script>
@@ -219,14 +236,42 @@ async function load() {
     render(); renderW(); renderG();
   } catch (e) { $("statusTxt").textContent = REPO ? "还读不到成绩：" + e.message + "（机器人还没上传过？）" : "网址不对：要用 用户名.github.io/repo名/"; $("status").classList.add("bad"); }
 }
-$("refresh").onclick = () => { load(); loadT(); loadC(); };
-let TD = null, TAB = "M";
-function tab(v) { TAB = v; $("tabM").setAttribute("aria-selected", String(v === "M")); $("tabT").setAttribute("aria-selected", String(v === "T"));
-  $("paneM").hidden = v !== "M"; $("paneT").hidden = v !== "T"; try { localStorage.setItem("tab", v); } catch (e) {}
-  if (v === "T") { if (TD) renderT(); else loadT(); } else if (D) render(); statusLine(); }
-$("tabM").onclick = () => tab("M"); $("tabT").onclick = () => tab("T");
+$("refresh").onclick = () => { load(); loadT(); loadFV(); loadC(); };
+let TD = null, CD = null, TAB = "M";
+function tab(v) { TAB = v; ["M", "T", "C"].forEach(k => { $("tab" + k).setAttribute("aria-selected", String(v === k)); $("pane" + k).hidden = v !== k; }); try { localStorage.setItem("tab", v); } catch (e) {}
+  if (v === "T") { if (TD) renderT(); else loadT(); } else if (v === "C") { if (CD) renderFV(); else loadFV(); } else if (D) render(); statusLine(); }
+$("tabM").onclick = () => tab("M"); $("tabT").onclick = () => tab("T"); $("tabC").onclick = () => tab("C");
+async function loadFV() { try { CD = await getJ("fvg.json"); if (TAB === "C") renderFV(); renderW(); renderG(); } catch (e) { CD = null; if (TAB === "C") { $("cTiles").innerHTML = `<div class="empty">还读不到 C 组成绩（${esc(e.message)}）——C 组机器人要在 bot_config.json 里有 github 设定才会上传</div>`; } } statusLine(); }
+function renderFV() {
+  const start = +CD.start || 1000; let run = start;
+  const T = (CD.trades || []).map(r => { const U = +r.U; run += U; return {...r, U, bal: run, R: +r.R}; });
+  const bal = +CD.balance, pnl = bal - start, O = CD.open || [], P = CD.pending || [], unr = O.reduce((s, p) => s + (+p.unreal_U || 0), 0);
+  $("cBal").textContent = bal.toFixed(0) + " U"; $("cBal").className = "big " + c0(pnl);
+  $("cPnl").innerHTML = `<span class="${c0(pnl)}">${fU(pnl)}（${(pnl / start * 100 >= 0 ? "+" : "") + (pnl / start * 100).toFixed(1)}%）</span> · 起始 ${start} U` + (O.length ? ` · 持仓浮动 <span class="${c0(unr)}">${fU(unr)}</span>` : "");
+  const n = T.length, w = T.filter(t => t.U > 0), l = T.filter(t => t.U <= 0), wu = w.reduce((a, t) => a + t.U, 0), lu = l.reduce((a, t) => a + t.U, 0), rAvg = n ? T.reduce((a, t) => a + (isNaN(t.R) ? 0 : t.R), 0) / n : 0;
+  let peak = start, mdd = 0; T.forEach(t => { peak = Math.max(peak, t.bal); mdd = Math.max(mdd, (peak - t.bal) / peak); });
+  const tile = (lab, val, cls, small) => `<div class="tile"><span class="lab">${lab}</span><b class="${cls || ""}">${val}</b>${small ? `<small>${small}</small>` : ""}</div>`;
+  $("cTiles").innerHTML = tile("平仓单数", n, "", (O.length ? `持仓 ${O.length}` : "") + (P.length ? ` 挂单 ${P.length}` : "")) + tile("胜率", n ? (w.length / n * 100).toFixed(1) + "%" : "—")
+    + tile("赚的单", `${w.length} · +${wu.toFixed(1)} U`, "pos") + tile("亏的单", `${l.length} · ${lu.toFixed(1)} U`, "neg")
+    + tile("每单平均", n ? fU(pnl / n) : "—", c0(pnl), n ? `${rAvg >= 0 ? "+" : ""}${rAvg.toFixed(2)} R（回测 2025–26 +0.14 R）` : "") + tile("最大回撤", (mdd * 100).toFixed(1) + "%", mdd > .3 ? "neg" : "");
+  drawEq(T, start, null, "cEq", "cEqTip");
+  $("cOpenTitle").textContent = `持仓中（${O.length}）`;
+  $("cOpen").innerHTML = O.length ? `<tr><th>币</th><th>方向</th><th>进场</th><th>进场价</th><th>止损</th><th>止盈</th><th>现价</th><th>浮动</th></tr>` + O.map(p =>
+    `<tr><td>${esc(coin(p.sym))}</td><td><span class="pill ${p.d === 1 ? "long" : "short"}">${p.d === 1 ? "做多" : "做空"}</span></td><td class="num">${fT(+p.t_in)}</td><td class="num">${fP(+p.en)}</td><td class="num">${fP(+p.st)}</td><td class="num">${fP(+p.tp)}</td><td class="num">${fP(+p.cur)}</td><td class="num ${c0(+p.unreal_U || 0)}">${fU(+p.unreal_U || 0)}</td></tr>`).join("") : `<tr><td class="empty">现在没有持仓</td></tr>`;
+  $("cPendTitle").textContent = `挂单中（${P.length}）`;
+  $("cPend").innerHTML = P.length ? `<tr><th>币</th><th>方向</th><th>挂单价</th><th>止损</th><th>止盈</th><th>讯号</th><th>有效到</th></tr>` + P.map(p =>
+    `<tr><td>${esc(coin(p.sym))}</td><td><span class="pill ${p.d === 1 ? "long" : "short"}">${p.d === 1 ? "做多" : "做空"}</span></td><td class="num">${fP(+p.px)}</td><td class="num">${fP(+p.st)}</td><td class="num">${fP(+p.tp)}</td><td class="num">${+p.sg > 1e12 ? fT(+p.sg) : esc(p.sg)}</td><td class="num">${+p.until > 1e12 ? fT(+p.until) : esc(p.until)}</td></tr>`).join("") : `<tr><td class="empty">现在没有挂单</td></tr>`;
+  const g = new Map(); T.forEach(t => { const k = coin(t.sym); const x = g.get(k) || {n: 0, w: 0, u: 0}; x.n++; if (t.U > 0) x.w++; x.u += t.U; g.set(k, x); });
+  $("cSym").innerHTML = n ? `<tr><th>币</th><th>单数</th><th>胜率</th><th>盈亏</th></tr>` + [...g].sort().map(([k, x]) => `<tr><td>${esc(k)}</td><td class="num">${x.n}</td><td class="num">${(x.w / x.n * 100).toFixed(0)}%</td><td class="num ${c0(x.u)}">${fU(x.u)}</td></tr>`).join("") : `<tr><td class="empty">还没有平仓的单</td></tr>`;
+  $("cCnt").textContent = `平仓的单（${n}）`;
+  $("cTr").innerHTML = n ? `<tr><th>币</th><th>方向</th><th>进场</th><th>平仓</th><th>进场价</th><th>止损</th><th>止盈</th><th>平仓价</th><th>结果</th><th>R</th><th>盈亏</th></tr>` + T.slice().reverse().map(t =>
+    `<tr><td>${esc(coin(t.sym))}</td><td>${esc(t.dir)}</td><td class="num">${esc(t.t_in)}</td><td class="num">${esc(t.t_out)}</td><td class="num">${fP(+t.entry)}</td><td class="num">${fP(+t.stop)}</td><td class="num">${fP(+t.tp)}</td><td class="num">${fP(+t.exit)}</td><td>${esc(t.result)}</td><td class="num">${isNaN(t.R) ? "—" : t.R.toFixed(2)}</td><td class="num ${c0(t.U)}">${fU(t.U)}</td></tr>`).join("") : `<tr><td class="empty">还没有平仓的单</td></tr>`;
+}
 async function loadT() { try { TD = await getJ("d20.json"); if (TAB === "T") renderT(); renderW(); renderG(); } catch (e) { TD = null; if (TAB === "T") { $("tTiles").innerHTML = `<div class="empty">还读不到 B 组成绩（${esc(e.message)}）</div>`; } } statusLine(); }
-function statusLine() { if (TAB !== "T") return; if (!TD) { $("statusTxt").textContent = "B 组载入中…"; return; }
+function statusLine() {
+  if (TAB === "C") { if (!CD) { $("statusTxt").textContent = "C 组载入中…"; return; } const age = (Date.now() - (CD.last_cycle || CD.updated)) / 60000; $("status").classList.toggle("bad", age > 60);
+    $("statusTxt").textContent = age > 60 ? `C 组机器人 ${Math.round(age)} 分钟没更新，可能停了` : `C 组机器人正常 · ${Math.max(0, Math.round(age))} 分钟前回报（每 30 分钟一次）`; $("sub").textContent = `${CD.started || "—"} 开始`; return; }
+  if (TAB !== "T") return; if (!TD) { $("statusTxt").textContent = "B 组载入中…"; return; }
   const age = (Date.now() - TD.updated) / 60000; $("status").classList.toggle("bad", age > 60);
   $("statusTxt").textContent = age > 60 ? `B 组机器人 ${Math.round(age)} 分钟没更新，可能停了` : `B 组机器人正常 · ${Math.round(age)} 分钟前回报（每 15 分钟一次；4 小时 K 收线才开平仓）`; $("sub").textContent = `${TD.started || "—"} 开始`; }
 function renderT() {
@@ -375,7 +420,7 @@ function candle(c, d, tip) {
 }
 
 // ── 钱包：A + B 共用一个 ──
-const AM = 50;   // A 组每单保证金（50 U × 100 倍）
+const AM = 100;   // A 组每单保证金（2026-10-23 起 100 U × 100 倍；每笔有记 margin 的用记录的）
 const pT = s => { const m = /^(\d\d)-(\d\d) (\d\d):(\d\d)/.exec(s || ""); if (!m) return null; const y = new Date().getUTCFullYear();
   let t = Date.UTC(y, +m[1] - 1, +m[2], +m[3], +m[4]) - MY; if (t > Date.now() + 864e5) t = Date.UTC(y - 1, +m[1] - 1, +m[2], +m[3], +m[4]) - MY; return t; };
 function wStart() { try { const v = +localStorage.getItem("wStart"); if (v > 0) return v; } catch (e) {} return 1000; }
@@ -383,53 +428,56 @@ $("wStart").value = wStart();
 $("wStart").onchange = () => { const v = +$("wStart").value; if (v > 0) { try { localStorage.setItem("wStart", String(v)); } catch (e) {} } renderW(); };
 function renderW() {
   const S = wStart();
-  const aOk = D && !D.empty, bOk = !!TD;
-  const aR = aOk ? (+D.balance || 0) - (+D.start || 0) : 0, bR = bOk ? (+TD.bal || 0) - (+TD.start || 0) : 0;
-  const aO = aOk ? (D.open || []) : [], bO = bOk ? (TD.open || []) : [];
-  const aU = aO.reduce((s, p) => s + (+p.unreal_U || 0), 0), bU = bO.reduce((s, p) => s + (+p.U || 0), 0);
+  const aOk = D && !D.empty, bOk = !!TD, cOk = !!CD;
+  const aR = aOk ? (+D.balance || 0) - (+D.start || 0) : 0, bR = bOk ? (+TD.bal || 0) - (+TD.start || 0) : 0, cR = cOk ? (+CD.balance || 0) - (+CD.start || 0) : 0;
+  const aO = aOk ? (D.open || []) : [], bO = bOk ? (TD.open || []) : [], cO = cOk ? (CD.open || []) : [];
+  const aU = aO.reduce((s, p) => s + (+p.unreal_U || 0), 0), bU = bO.reduce((s, p) => s + (+p.U || 0), 0), cU = cO.reduce((s, p) => s + (+p.unreal_U || 0), 0);
   const bMiss = bO.some(p => p.margin == null);
-  const aM = aO.length * AM, bM = bO.reduce((s, p) => s + (+p.margin || 0), 0);
-  const bal = S + aR + bR, eq = bal + aU + bU, used = aM + bM, free = eq - used;
-  $("wBal").textContent = bal.toFixed(1) + " U"; $("wBal").className = "big num " + c0(aR + bR);
-  $("wSub").innerHTML = `起始 ${S} U · 已实现 <span class="${c0(aR + bR)}">${fU(aR + bR)}</span>` + (aU || bU ? ` · 算上持仓浮动 = <b class="num">${eq.toFixed(1)} U</b>` : "");
-  const pa = eq > 0 ? Math.min(100, aM / eq * 100) : 0, pb = eq > 0 ? Math.min(100 - pa, bM / eq * 100) : 0;
-  $("wBar").innerHTML = `<i class="a" style="width:${pa}%"></i><i class="b" style="width:${pb}%"></i>`;
+  const aM = aO.reduce((s, p) => s + (+p.margin || AM), 0), bM = bO.reduce((s, p) => s + (+p.margin || 0), 0), cM = cO.reduce((s, p) => s + (+p.margin || 100), 0);
+  const allR = aR + bR + cR, allU = aU + bU + cU;
+  const bal = S + allR, eq = bal + allU, used = aM + bM + cM, free = eq - used;
+  $("wBal").textContent = bal.toFixed(1) + " U"; $("wBal").className = "big num " + c0(allR);
+  $("wSub").innerHTML = `起始 ${S} U · 已实现 <span class="${c0(allR)}">${fU(allR)}</span>` + (allU ? ` · 算上持仓浮动 = <b class="num">${eq.toFixed(1)} U</b>` : "");
+  const pa = eq > 0 ? Math.min(100, aM / eq * 100) : 0, pb = eq > 0 ? Math.min(100 - pa, bM / eq * 100) : 0, pc = eq > 0 ? Math.min(100 - pa - pb, cM / eq * 100) : 0;
+  $("wBar").innerHTML = `<i class="a" style="width:${pa}%"></i><i class="b" style="width:${pb}%"></i><i class="c" style="width:${pc}%;background:var(--up)"></i>`;
   // 开始以来最多同时占用（平仓的单 + 现在的持仓）
   const ev = [];
-  if (aOk) { (D.trades || []).forEach(t => { const a = pT(t.t_in), b = pT(t.t_out); if (a != null && b != null) { ev.push([a, AM]); ev.push([b, -AM]); } });
-    aO.forEach(p => ev.push([+p.t_in || Date.now(), AM])); }
+  if (aOk) { (D.trades || []).forEach(t => { const a = pT(t.t_in), b = pT(t.t_out), m = +t.margin || AM; if (a != null && b != null) { ev.push([a, m]); ev.push([b, -m]); } });
+    aO.forEach(p => ev.push([+p.t_in || Date.now(), +p.margin || AM])); }
+  if (cOk) { (CD.trades || []).forEach(t => { const a = pT(t.t_in), b = pT(t.t_out), m = +t.margin || 100; if (a != null && b != null) { ev.push([a, m]); ev.push([b, -m]); } });
+    cO.forEach(p => ev.push([+p.t_in || Date.now(), +p.margin || 100])); }
   if (bOk) { const lev = +TD.lev || 2; (TD.trades || []).forEach(t => { const a = pT(t.t_in), b = pT(t.t_out), m = (+t.notional || 0) / lev; if (a != null && b != null) { ev.push([a, m]); ev.push([b, -m]); } });
     bO.forEach(p => ev.push([+p.t_in || Date.now(), +p.margin || 0])); }
   ev.sort((x, y) => x[0] - y[0] || x[1] - y[1]); let cur = 0, peak = 0, peakT = null; ev.forEach(([t, m]) => { cur += m; if (cur > peak + 1e-9) { peak = cur; peakT = t; } });
   const tile = (lab, val, cls, small) => `<div class="tile"><span class="lab">${lab}</span><b class="${cls || ""}">${val}</b>${small ? `<small>${small}</small>` : ""}</div>`;
   $("wTiles").innerHTML =
-      tile("已实现盈亏", fU(aR + bR), c0(aR + bR), `A ${fU(aR)} · B ${fU(bR)}`)
-    + tile("持仓浮动", fU(aU + bU), c0(aU + bU), `A ${aO.length} 单 ${fU(aU)} · B ${bO.length} 单 ${fU(bU)}`)
-    + tile("占用保证金", used.toFixed(1) + " U" + (bMiss ? "*" : ""), "", `A ${aM.toFixed(0)}（${aO.length} × ${AM}）· B ${bM.toFixed(1)}`)
+      tile("已实现盈亏", fU(allR), c0(allR), `A ${fU(aR)} · B ${fU(bR)} · C ${fU(cR)}`)
+    + tile("持仓浮动", fU(allU), c0(allU), `A ${aO.length} 单 ${fU(aU)} · B ${bO.length} 单 ${fU(bU)} · C ${cO.length} 单 ${fU(cU)}`)
+    + tile("占用保证金", used.toFixed(1) + " U" + (bMiss ? "*" : ""), "", `A ${aM.toFixed(0)} · B ${bM.toFixed(1)} · C ${cM.toFixed(0)}`)
     + tile("还可以用", free.toFixed(1) + " U", free < 0 ? "neg" : "", eq > 0 ? `占用 ${(used / eq * 100).toFixed(0)}%` : "")
     + tile("开始以来最多同时占用", peak.toFixed(1) + " U", "", peakT ? fT(peakT) : "还没开过单");
   $("wNote").innerHTML = (bMiss ? "* B 组机器人要更新到 2026-10-20a 版才会回报保证金，现在 B 组没算进去。 " : "")
-    + "回测参考（2021–2026）：B 组 10 个币最多同时占用约 <b>712 U</b>（平常约 210 U），A 组最多 4 × 50 = <b>200 U</b>。两个加起来最多约 910 U，钱包要比这个多，再留回撤的空间。";
+    + "回测参考：B 组 10 个币最多同时占用约 <b>712 U</b>（平常约 210 U）；A 组每单 100 U、C 组每单 100 U，同时几单就几百 U。钱包要比这些加起来多，再留回撤的空间（A 组 2025–26 回测最大回撤约 1,400 U）。";
 }
 
 // ── 机器人核对：跑的版本 / 设定码 是不是预期的；每日对账结果 ──
-const EXPECT = {A: {version: "2026-10-20a", fp: "d42202ee"}, B: {version: "2026-10-20c", fp: "4fd769d8"}};
+const EXPECT = {A: {version: "2026-10-23b", fp: "f69dc98a"}, B: {version: "2026-10-20c", fp: "4fd769d8"}, C: {version: "2026-10-23a", fp: null}};   // 2026-11-02：A 组改成 10/23 Sun 设定；C 组设定码先不核对
 let CK = null, CKerr = null;
 async function loadC() { try { CK = await getJ("check.json"); CKerr = null; } catch (e) { CK = null; CKerr = e.message; } renderG(); }
 function renderG() {
   const one = (g, x) => {
     if (!x) return [`${g} 组 载入中…`, false];
     if (!x.version) return [`${g} 组 <span class="bad">✗ 旧版机器人（没有回报版本）</span>`, true];
-    const ok = x.version === EXPECT[g].version && x.fp === EXPECT[g].fp;
-    return [`${g} 组 版本 <span class="num">${esc(x.version)}</span> · 设定码 <span class="num">${esc(x.fp)}</span> ` + (ok ? `<span class="ok">✓ 跟预期一样</span>` : `<span class="bad">✗ 预期 ${EXPECT[g].version} · ${EXPECT[g].fp}</span>`), !ok];
+    const ok = x.version === EXPECT[g].version && (EXPECT[g].fp == null || x.fp === EXPECT[g].fp);
+    return [`${g} 组 版本 <span class="num">${esc(x.version)}</span> · 设定码 <span class="num">${esc(x.fp)}</span> ` + (ok ? `<span class="ok">✓ 跟预期一样${EXPECT[g].fp == null ? "（设定码没核对）" : ""}</span>` : `<span class="bad">✗ 预期 ${EXPECT[g].version} · ${EXPECT[g].fp || "—"}</span>`), !ok];
   };
-  const [ha, ba] = one("A", D && !D.empty ? D : null), [hb, bb] = one("B", TD);
-  $("gA").innerHTML = ha; $("gB").innerHTML = hb;
-  let bad = ba || bb, items = [];
+  const [ha, ba] = one("A", D && !D.empty ? D : null), [hb, bb] = one("B", TD), [hc, bc] = one("C", CD);
+  $("gA").innerHTML = ha; $("gB").innerHTML = hb; $("gCv").innerHTML = hc;
+  let bad = ba || bb || bc, items = [];
   if (CK) {
     const age = (Date.now() - CK.updated) / 3600e3, stale = age > 26;
     $("gC").innerHTML = `每日对账（${fT(CK.updated)}）：` + (CK.ok ? `<span class="ok">✓ 全部一样</span>` : `<span class="bad">✗ ${CK.issues.length} 个地方不一样</span>`)
-      + ["a", "b"].map(k => CK[k] && CK[k].expected != null ? ` · ${k.toUpperCase()} 组 应有 ${CK[k].expected}、对上 ${CK[k].matched}` : "").join("")
+      + ["a", "b", "c"].map(k => CK[k] && CK[k].expected != null ? ` · ${k.toUpperCase()} 组 应有 ${CK[k].expected}、对上 ${CK[k].matched}` : "").join("")
       + (stale ? ` <span class="bad">（超过一天没对账，检查 iMac）</span>` : "");
     if (!CK.ok || stale) bad = true; items = CK.ok ? [] : CK.issues;
   } else $("gC").textContent = "每日对账：还没跑过" + (CKerr && !/404/.test(CKerr) ? `（${CKerr}）` : "");
@@ -437,8 +485,8 @@ function renderG() {
   $("guard").classList.toggle("alert", bad);
 }
 window.addEventListener("resize", () => { if (D) render(); });
-load(); loadT(); loadC(); timer = setInterval(() => { if (!document.hidden) { load(); loadT(); loadC(); } }, 120000);
-try { if (localStorage.getItem("tab") === "T") tab("T"); } catch (e) {}
+load(); loadT(); loadFV(); loadC(); timer = setInterval(() => { if (!document.hidden) { load(); loadT(); loadFV(); loadC(); } }, 120000);
+try { const tb = localStorage.getItem("tab"); if (tb === "T" || tb === "C") tab(tb); } catch (e) {}
 })();
 </script>
 </body>
